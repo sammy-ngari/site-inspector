@@ -9,6 +9,9 @@ It only evaluates publicly exposed configuration and response behavior.
 
 ---
 
+Author: Sammy Ngari  
+Maintainer: Sammy Ngari
+
 ## What It Checks
 
 * Connectivity & response behavior
@@ -17,6 +20,10 @@ It only evaluates publicly exposed configuration and response behavior.
 * Security headers
 * CMS detection (WordPress, Shopify, Wix, Drupal, Joomla)
 * Basic operational risk interpretation
+* Compression detection
+* Browser caching analysis
+* Cookie security inspection
+* Infrastructure fingerprinting
 
 ---
 
