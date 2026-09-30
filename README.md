@@ -48,9 +48,29 @@ pip install -r requirements.txt
 
 Run:
 
+```bash
 python main.py
+```
 
 Then enter a domain name (example: example.com)
+
+Or run a direct domain inspection:
+
+```bash
+python main.py --domain example.com
+```
+
+Output the structured inspection result as JSON:
+
+```bash
+python main.py --domain example.com --json
+```
+
+Show the current tool version:
+
+```bash
+python main.py --version
+```
 
 ---
 
@@ -69,4 +89,6 @@ It is intended for:
 
 ## Version
 
-v1.0 — Initial Release
+v1.2 — Current Project Version
+
+See [CHANGELOG.md](CHANGELOG.md) for a summary of v1.2 updates.

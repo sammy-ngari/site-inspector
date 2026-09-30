@@ -1,100 +1,125 @@
 """
 Risk interpretation layer.
 
-Converts collected technical indicators into
+Converts structured scan data into
 a scored operational risk classification.
 """
 
-def analyze_risk(basic, ssl_data, headers, cms, compression, cache, cookies):
+from rules import build_interpretation_result
 
+HIGH_RISK_THRESHOLD = 9
+MEDIUM_RISK_THRESHOLD = 5
+
+
+def _build_risk_summary(level, connectivity, findings):
     """
-    Evaluate collected indicators and compute overall risk level.
-
-    Parameters
-    ----------
-    basic : dict
-        Baseline response metrics.
-    ssl_data : dict
-        TLS inspection results.
-    headers : dict
-        Security header presence mapping.
-    cms : str
-        Detected CMS name.
-
-    Returns
-    -------
-    tuple[str, list[str]]
-        Risk level ("High", "Medium", "Low")
-        and list of identified issues.
+    Create a consultant-style summary sentence for the report header.
     """
-    
-    issues = []
-    score = 0 
 
-    #SSL
-    if not ssl_data["Valid"]:
-        issues.append("No valid SSL certificate (users may see security warnings)")
-        score += 4
-    elif ssl_data["Days Left"] < 30:
-        issues.append(f"SSL certificate expiring soon (in {ssl_data['Days Left']} days)")
-        score += 3
+    if not connectivity.get("reachable"):
+        return (
+            "The website could not be reached during the request. "
+            "Configuration analysis could not be completed."
+        )
 
-    #Response Time
-    if basic["response_time"] > 2:
-        issues.append(f"Slow response time ({basic['response_time']} seconds). Possible hosting or optimization issue")
-        score += 2
+    if not findings:
+        return (
+            "The website is reachable and serving content. Only minor "
+            "configuration improvements or informational observations were identified."
+        )
 
-    #Redirects
-    if basic["redirects"] == 0:
-        issues.append("HTTPS redirect may not be enforced (users may access insecure version)")
-        score += 2
+    if level == "High":
+        return (
+            "A significant operational issue was observed that may affect "
+            "availability, trust, or maintenance reliability."
+        )
 
-    #Security Headers
-    if headers["CSP"] == "Missing":
-        issues.append("Missing Content-Security-Policy header (increased risk of XSS attacks)")
-        score += 2
+    if level == "Medium":
+        return (
+            "The site is reachable and serving content, but several "
+            "configuration improvements are recommended."
+        )
 
-    if headers["HSTS"] == "Missing":
-        issues.append("Missing Strict-Transport-Security header (connections may downgrade to HTTP)")
-        score += 2
+    return (
+        "The website is reachable and serving content. Only minor "
+        "configuration improvements or informational observations were identified."
+    )
 
-    if headers["X-Content-Type-Options"] == "Missing":
-        issues.append("Missing X-Content-Type-Options header (increased risk of MIME type confusion attacks)")
-        score += 2
 
-    if headers["X-Frame-Options"] == "Missing":
-        issues.append("Missing X-Frame-Options header (increased risk of clickjacking attacks)")
-        score += 2
+def _issue_message_from_finding(finding):
+    """
+    Convert a finding into the flatter issue wording used by the current report.
+    """
 
-    if headers["Referrer-Policy"] == "Missing":
-        issues.append("Missing Referrer-Policy header (potential information leakage through referrer)")
-        score += 2
+    if finding.get("recommendation"):
+        return f"{finding['observation']} {finding['recommendation']}"
 
-    #WordPress specific
-    if cms == "WordPress":
-        issues.append("Site is running WordPress (common target for attacks, ensure it's updated)")
+    return finding["observation"]
 
-    # Compression
-    if not compression["enabled"]:
-        issues.append("HTTP compression not enabled (performance optimization recommended)")
-        score += 1
 
-    # Cache
-    if not cache["configured"]:
-        issues.append("Browser caching not configured (may impact performance efficiency)")
-        score += 1
+def _determine_override(findings):
+    """
+    Apply explicit high-risk overrides for severe operational conditions.
+    """
 
-    # Cookie Security
-    if cookies.get("present") and not cookies.get("secure_flag"):
-        issues.append("Session cookies not marked as Secure (recommended for HTTPS sites)")
-        score += 2
-    
-    #Risk Level
-    if score >= 9:
+    override_mapping = {
+        "finding.connectivity.unreachable": "Site unreachable",
+        "finding.tls.invalid": "TLS invalid",
+        "finding.tls.expiring_soon": "TLS expiry under 30 days",
+        "finding.connectivity.server_error": "Server error response",
+    }
+
+    finding_ids = {finding["id"] for finding in findings}
+    for finding_id, override in override_mapping.items():
+        if finding_id in finding_ids:
+            return override
+
+    return None
+
+
+def analyze_risk(scan_result):
+    """
+    Evaluate structured findings and compute overall risk level.
+    """
+
+    connectivity = scan_result["connectivity"]
+    interpretation_result = build_interpretation_result(scan_result)
+    scan_result["evidence"] = interpretation_result["evidence"]
+    scan_result["observations"] = interpretation_result["observations"]
+    scan_result["findings"] = interpretation_result["findings"]
+    scan_result["recommendations"] = interpretation_result["recommendations"]
+
+    findings = scan_result["findings"]
+    score = sum(finding["score"] for finding in findings)
+    override = _determine_override(findings)
+
+    if override:
         level = "High"
-    elif score >= 5:
+    elif score >= HIGH_RISK_THRESHOLD:
+        level = "High"
+    elif score >= MEDIUM_RISK_THRESHOLD:
         level = "Medium"
     else:
         level = "Low"
 
-    return level, issues
+    contributors = [
+        finding["id"] for finding in findings if finding["score"] > 0
+    ]
+    issues = [
+        {
+            "id": finding["id"],
+            "severity": finding["risk_contribution"],
+            "score": finding["score"],
+            "message": _issue_message_from_finding(finding),
+        }
+        for finding in findings
+    ]
+
+    return {
+        "level": level,
+        "score": score,
+        "summary": _build_risk_summary(level, connectivity, findings),
+        "contributors": contributors,
+        "issues": issues,
+        "override": override,
+    }
